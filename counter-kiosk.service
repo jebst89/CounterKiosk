@@ -1,0 +1,42 @@
+[Unit]
+Description=Counter Kiosk (GPIO button counter with 7-segment HDMI display)
+# Wait until the graphical target is up so a display is available.
+After=multi-user.target systemd-user-sessions.service
+Wants=multi-user.target
+# Never stop retrying restarts (belongs in [Unit] per systemd spec).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+
+# --- Who and where --------------------------------------------------------
+# Runs as the "pi" user so GPIO and the framebuffer are accessible. Change
+# User/Group and the paths below if you deploy under a different account or
+# directory. The user must be in the "video" and "gpio" groups (see README).
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/CounterKiosk
+
+# --- Display / framebuffer access -----------------------------------------
+# Render straight to the Linux framebuffer via SDL's KMS/DRM backend, so no
+# desktop environment (X/Wayland) is required. This keeps boot fast and the
+# system lean. If you instead run inside the desktop, drop the SDL_VIDEODRIVER
+# line and set: Environment=DISPLAY=:0
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=PYTHONUNBUFFERED=1
+# Use the lgpio pin factory (works on the Zero W and the Pi 4/5).
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+
+# Use the project virtualenv's Python (see README for venv setup). If you
+# installed the deps system-wide instead, change this to /usr/bin/python3.
+ExecStart=/home/pi/CounterKiosk/.venv/bin/python /home/pi/CounterKiosk/counter_kiosk.py
+
+# --- Auto-recovery --------------------------------------------------------
+# Restart on any exit (crash, error, or clean stop) so the kiosk always comes
+# back. On power loss the Pi reboots and systemd starts this unit fresh; the
+# app reloads the last count from SQLite and resumes.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

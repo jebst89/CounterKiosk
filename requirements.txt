@@ -1,0 +1,33 @@
+# Counter Kiosk runtime dependencies.
+#
+# TARGET: Raspberry Pi Zero W (original, single-core ARMv6) on Raspberry Pi OS.
+#
+# IMPORTANT for the Zero W: prefer the system packages for pygame and the lgpio
+# backend rather than building wheels from source. On ARMv6, `pip install
+# pygame` frequently tries to compile from source and is slow or fails. Install
+# these via apt instead (see README), then create the venv with
+# --system-site-packages so it can see them:
+#
+#   sudo apt install -y python3-pygame python3-lgpio
+#   python3 -m venv --system-site-packages .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# With python3-pygame installed via apt and visible through
+# --system-site-packages, pip will not need to build it. gpiozero is pure
+# Python and installs cleanly from pip on ARMv6.
+
+gpiozero==2.0.1
+
+# --- Provided by apt on the Zero W (do not pip-build these on ARMv6) ---------
+# pygame        -> sudo apt install python3-pygame
+# lgpio backend -> sudo apt install python3-lgpio
+#
+# gpiozero uses lgpio as its pin factory (works on both the Zero W and Pi 4/5).
+# The lines below are left commented so pip does not try to compile them on the
+# Zero W. On a more powerful board (Pi 4/5) you may uncomment them to pip-install
+# instead of using apt.
+#
+# pygame==2.6.1
+# rpi-lgpio==0.6
+
+# Note: sqlite3 is part of the Python standard library — no package needed.
