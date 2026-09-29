@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 
 import pygame
 
@@ -101,8 +102,8 @@ class KioskApp:
         self._store = CounterStore(config.DB_PATH)
         # Resume from the last persisted value.
         self._count = self._store.get_count()
-        # Guards _count and the dirty flag across the GPIO callback thread and
-        # the main render thread.
+        # Guards _count, the dirty flag, and the activity timestamp across the
+        # GPIO callback thread and the main render thread.
         self._lock = threading.Lock()
         self._dirty = True  # force an initial draw
 
@@ -118,21 +119,37 @@ class KioskApp:
         self._header_font = None
         self._footer_font = None
 
+        # --- burn-in protection state ---
+        # Timestamp (monotonic) of the last button press; drives the inactivity
+        # trigger for the screensaver.
+        self._last_activity = time.monotonic()
+        # Loaded screensaver image surface, or None if disabled/unavailable.
+        self._screensaver_img = None
+        # Whether the screensaver is currently displayed.
+        self._saver_active = False
+        # The pixel-shift offset last applied, so we know when to repaint.
+        self._shift = (0, 0)
+
     # --- state ---------------------------------------------------------------
 
     def _on_press(self) -> None:
-        """Button press handler. May be called from a gpiozero thread."""
+        """Button press handler. May be called from a gpiozero thread.
+
+        A press always counts, even while the screensaver is showing — the
+        screensaver is dismissed by the activity timestamp being refreshed here.
+        """
         new_value = self._store.increment()
         with self._lock:
             self._count = new_value
             self._dirty = True
+            self._last_activity = time.monotonic()
         print(f"[press] count = {new_value}")
 
     def _snapshot(self):
         with self._lock:
             dirty = self._dirty
             self._dirty = False
-            return self._count, dirty
+            return self._count, dirty, self._last_activity
 
     # --- display setup -------------------------------------------------------
 
@@ -151,6 +168,42 @@ class KioskApp:
         pygame.display.set_caption("Counter Kiosk")
         self._clock = pygame.time.Clock()
         self._build_fonts()
+        self._load_screensaver()
+
+    def _load_screensaver(self) -> None:
+        """Load and pre-scale the screensaver image, if one is configured.
+
+        On any problem (unset path, missing file, unsupported format) the image
+        stays None and only the pixel-shift layer will run — exactly the
+        behavior requested for the "no image" case.
+        """
+        path = getattr(config, "SCREENSAVER_IMAGE", None)
+        if not path:
+            return
+        if not os.path.isfile(path):
+            print(
+                f"[screensaver] image not found at {path!r}; "
+                f"image disabled (pixel-shift still active).",
+                file=sys.stderr,
+            )
+            return
+        try:
+            img = pygame.image.load(path).convert()
+            # Scale to fit the screen while preserving aspect ratio, centered on
+            # black. This avoids stretching whatever the user provides.
+            sw, sh = self._screen.get_size()
+            iw, ih = img.get_size()
+            scale = min(sw / iw, sh / ih)
+            new_size = (max(1, int(iw * scale)), max(1, int(ih * scale)))
+            self._screensaver_img = pygame.transform.smoothscale(img, new_size)
+            print(f"[screensaver] loaded {path!r} ({iw}x{ih} -> {new_size}).")
+        except Exception as exc:
+            print(
+                f"[screensaver] failed to load {path!r} ({exc!r}); "
+                f"image disabled (pixel-shift still active).",
+                file=sys.stderr,
+            )
+            self._screensaver_img = None
 
     @staticmethod
     def _parse_window_size(spec: str):
@@ -181,15 +234,71 @@ class KioskApp:
             self._header_font = None
             self._footer_font = None
 
+    # --- burn-in protection --------------------------------------------------
+
+    @staticmethod
+    def _pixel_shift(now: float):
+        """Return the current (dx, dy) pixel-shift offset.
+
+        The offset walks through a small set of positions on a slow cycle so no
+        pixel is lit in the same place forever. Deterministic (a pure function
+        of time) so the loop can detect when it changes and repaint only then.
+        """
+        max_shift = getattr(config, "PIXEL_SHIFT_MAX", 0)
+        interval = getattr(config, "PIXEL_SHIFT_INTERVAL_SECONDS", 60)
+        if max_shift <= 0 or interval <= 0:
+            return (0, 0)
+        # Cycle through the four corners of a small square: (+,+),(-,+),(-,-),(+,-).
+        step = int(now // interval)
+        offsets = [
+            (max_shift, max_shift),
+            (-max_shift, max_shift),
+            (-max_shift, -max_shift),
+            (max_shift, -max_shift),
+        ]
+        return offsets[step % len(offsets)]
+
+    def _should_show_saver(self, idle: float) -> bool:
+        """Return True if the screensaver image should be visible right now.
+
+        Requires a loaded image and a positive idle threshold. While idle, the
+        timeline repeats a cycle of length (IDLE + DURATION): the counter shows
+        for the first IDLE seconds of each cycle, the image for the final
+        DURATION seconds. This makes the image reappear periodically for as long
+        as the kiosk stays untouched, then a press resets the clock.
+        """
+        if self._screensaver_img is None:
+            return False
+        idle_secs = config.SCREENSAVER_IDLE_SECONDS
+        dur_secs = config.SCREENSAVER_DURATION_SECONDS
+        if idle_secs <= 0 or dur_secs <= 0:
+            return False
+        if idle < idle_secs:
+            return False
+        # Position within the repeating cycle.
+        phase = (idle - idle_secs) % (idle_secs + dur_secs)
+        return phase < dur_secs
+
+    def _render_screensaver(self) -> None:
+        """Fill the screen black and center the screensaver image on it."""
+        screen = self._screen
+        screen.fill(config.BACKGROUND)
+        if self._screensaver_img is not None:
+            sw, sh = screen.get_size()
+            rect = self._screensaver_img.get_rect(center=(sw / 2, sh / 2))
+            screen.blit(self._screensaver_img, rect)
+        pygame.display.flip()
+
     # --- rendering -----------------------------------------------------------
 
-    def _render(self, count: int) -> None:
+    def _render(self, count: int, shift=(0, 0)) -> None:
         screen = self._screen
         sw, sh = screen.get_size()
         screen.fill(config.BACKGROUND)
 
-        top_margin = sh * 0.06
-        bottom_margin = sh * 0.06
+        dx, dy = shift
+        top_margin = sh * 0.06 + dy
+        bottom_margin = sh * 0.06 - dy
 
         # Header (top) and footer (bottom), centered horizontally. Skipped
         # gracefully if fonts weren't available.
@@ -202,7 +311,7 @@ class KioskApp:
             header_h = header.get_height()
             screen.blit(
                 header,
-                header.get_rect(center=(sw / 2, top_margin + header_h / 2)),
+                header.get_rect(center=(sw / 2 + dx, top_margin + header_h / 2)),
             )
         if self._footer_font is not None:
             footer = self._footer_font.render(
@@ -212,7 +321,7 @@ class KioskApp:
             screen.blit(
                 footer,
                 footer.get_rect(
-                    center=(sw / 2, sh - bottom_margin - footer_h / 2)
+                    center=(sw / 2 + dx, sh - bottom_margin - footer_h / 2)
                 ),
             )
 
@@ -228,7 +337,7 @@ class KioskApp:
         self._renderer.draw_number(
             screen,
             count,
-            center=(sw / 2.0, band_center_y),
+            center=(sw / 2.0 + dx, band_center_y),
             max_width=max_counter_w,
             max_height=max_counter_h,
             min_digits=config.MIN_DIGITS,
@@ -253,9 +362,39 @@ class KioskApp:
                     else:
                         self._buttons.handle_key(event)
 
-                count, dirty = self._snapshot()
-                if dirty:
-                    self._render(count)
+                count, dirty, last_activity = self._snapshot()
+                now = time.monotonic()
+                idle = now - last_activity
+
+                # Decide whether the screensaver should be showing. It only
+                # engages when there IS an image to show; with no image we rely
+                # on pixel-shift alone (per the requested "no image" behavior).
+                #
+                # While idle, the display cycles: show the counter for
+                # IDLE_SECONDS, then the image for DURATION_SECONDS, repeating.
+                # A button press refreshes last_activity, resetting the cycle and
+                # returning to the counter immediately.
+                want_saver = self._should_show_saver(idle)
+
+                if want_saver:
+                    # Enter (or stay in) the screensaver. Draw once on entry.
+                    if not self._saver_active:
+                        self._saver_active = True
+                        self._render_screensaver()
+                    # A press refreshes last_activity, which drops us out of the
+                    # want_saver window on the next iteration and wakes the count.
+                elif self._saver_active:
+                    # Leaving the screensaver (woke by press, or the window
+                    # elapsed). Force a fresh counter draw.
+                    self._saver_active = False
+                    self._render(count, self._shift)
+                else:
+                    # Normal counter display. Repaint when the count changed or
+                    # when the pixel-shift offset advances.
+                    shift = self._pixel_shift(now)
+                    if dirty or shift != self._shift:
+                        self._shift = shift
+                        self._render(count, shift)
 
                 self._clock.tick(config.FPS)
         finally:

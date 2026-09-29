@@ -235,6 +235,41 @@ The atomic-commit approach above covers the counter data itself.
 | `MIN_DIGITS` | Leading-zero padding width (set to 6 for a fixed 6-digit display, e.g. 000042). |
 | `COUNTER_HEIGHT_FRACTION`, `*_FONT_FRACTION` | Layout scaling vs. screen height. |
 | `FPS` | Event-poll cadence (10 on the Zero W; app only repaints on change). |
+| `SCREENSAVER_IMAGE` | Path to a screensaver image, or `None` to disable (pixel-shift only). |
+| `SCREENSAVER_IDLE_SECONDS` | Inactivity before the image appears (default 600 = 10 min). |
+| `SCREENSAVER_DURATION_SECONDS` | How long the image shows before returning to the counter (default 20). |
+| `PIXEL_SHIFT_MAX` | Max pixels the layout is nudged for burn-in protection (0 disables). |
+| `PIXEL_SHIFT_INTERVAL_SECONDS` | How often the pixel-shift offset advances (default 60). |
+
+## Screen protection (burn-in)
+
+The counter can sit on the same value for a long time, so two layers protect the
+LCD from image persistence / burn-in. Both are configured in `config.py`.
+
+**1. Pixel-shift (always on).** The whole layout — counter, header, footer — is
+nudged by a few pixels on a slow cycle so no pixel stays lit in the exact same
+spot indefinitely. It is imperceptible to viewers and costs almost nothing.
+Tune with `PIXEL_SHIFT_MAX` (pixels) and `PIXEL_SHIFT_INTERVAL_SECONDS`, or set
+`PIXEL_SHIFT_MAX = 0` to turn it off.
+
+**2. Screensaver image (optional, inactivity-triggered).** After
+`SCREENSAVER_IDLE_SECONDS` with no button press, a configured image is shown for
+`SCREENSAVER_DURATION_SECONDS`, then the counter returns. While the kiosk stays
+idle this repeats, so the image cycles on and off periodically. The counter is
+the priority, so this only happens when the kiosk is idle — an actively used
+kiosk keeps showing the count.
+
+- Set `SCREENSAVER_IMAGE` to an absolute path (PNG/JPG/BMP). The image is scaled
+  to fit the screen with its aspect ratio preserved and centered on black.
+- If `SCREENSAVER_IMAGE` is `None` or the file is missing/unreadable, the image
+  is simply disabled and only pixel-shift runs — no error, the counter keeps
+  working.
+- **A button press always counts and immediately wakes the screen**, dropping
+  straight back to the (now incremented) counter.
+
+Defaults: image off, 10-minute idle trigger, 20-second display. For a kiosk
+that may sit untouched overnight, the 10-minute trigger keeps the panel resting
+most of the time while staying instantly responsive to a press.
 
 ## Future: AWS IoT
 
