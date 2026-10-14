@@ -32,21 +32,48 @@ SEGMENT_ON = (255, 0, 0)         # standard red, lit segment
 SEGMENT_OFF = (18, 0, 0)
 TEXT_COLOR = (255, 255, 255)     # white branding text
 
-# --- Display: branding text ---------------------------------------------------
-
-HEADER_TEXT = "Together we can beat 2026"
-FOOTER_TEXT = "Stronger Together"
-
 # --- Display: layout ----------------------------------------------------------
+#
+# The screen is divided into three vertical bands stacked top to bottom:
+#
+#     +------------------------------+
+#     |            HEADER            |   HEADER_HEIGHT_FRACTION
+#     +------------------------------+
+#     |      7-SEGMENT COUNTER       |   COUNTER_HEIGHT_FRACTION
+#     +------------------------------+
+#     |            FOOTER            |   FOOTER_HEIGHT_FRACTION
+#     +------------------------------+
+#
+# Each band's height is the given fraction of the total screen height. The
+# three fractions should sum to <= 1.0; any leftover becomes even spacing
+# distributed above/below the counter. If they sum to > 1.0 they are scaled
+# down proportionally (with a warning) so the layout always fits.
+HEADER_HEIGHT_FRACTION = 0.18
+COUNTER_HEIGHT_FRACTION = 0.52
+FOOTER_HEIGHT_FRACTION = 0.14
 
-# Fraction of screen height allotted to the 7-segment counter block. The header
-# and footer share the remaining space above and below.
-COUNTER_HEIGHT_FRACTION = 0.45
+# Content inside each band is scaled to this fraction of the band's height so it
+# has a little breathing room and never touches the band edges. Applies to the
+# header/footer text or image and to the counter digits.
+BAND_CONTENT_FRACTION = 0.85
 
-# Font sizes are derived from screen height so the layout scales to any HDMI
-# resolution. These are fractions of screen height.
-HEADER_FONT_FRACTION = 0.09
-FOOTER_FONT_FRACTION = 0.07
+# --- Display: header & footer content -----------------------------------------
+#
+# Each of the header and footer can show either TEXT or an IMAGE, selected by
+# the *_MODE setting:
+#   "text"  -> renders the corresponding *_TEXT string in white.
+#   "image" -> loads the corresponding *_IMAGE file and scales it (preserving
+#              aspect ratio) so its height fills the band's content area.
+# If a mode is "image" but the file is missing/unreadable, that band falls back
+# to its text so the display still works.
+
+HEADER_MODE = "text"             # "text" or "image"
+HEADER_TEXT = "Together we can beat 2026"
+HEADER_IMAGE = None              # e.g. str(Path(__file__).resolve().parent / "header.png")
+
+FOOTER_MODE = "text"             # "text" or "image"
+FOOTER_TEXT = "Stronger Together"
+FOOTER_IMAGE = None              # e.g. str(Path(__file__).resolve().parent / "footer.png")
 
 # Minimum number of digits to show (leading zeros pad to this width), giving a
 # stable odometer look. Fixed at 6 so the display always reads e.g. 000042.

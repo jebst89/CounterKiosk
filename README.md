@@ -221,6 +221,57 @@ consider one of:
 
 The atomic-commit approach above covers the counter data itself.
 
+## Display layout
+
+The screen is divided into three stacked bands — **header**, **counter**,
+**footer** — whose heights you set in `config.py` as fractions of the total
+screen height:
+
+```
++------------------------------+
+|            HEADER            |   HEADER_HEIGHT_FRACTION   (e.g. 0.18)
++------------------------------+
+|      7-SEGMENT COUNTER       |   COUNTER_HEIGHT_FRACTION  (e.g. 0.52)
++------------------------------+
+|            FOOTER            |   FOOTER_HEIGHT_FRACTION   (e.g. 0.14)
++------------------------------+
+```
+
+- The three fractions should sum to **1.0 or less**. Any leftover becomes even
+  spacing distributed as four equal gaps (above the header, between each band,
+  and below the footer), which keeps the layout vertically balanced.
+- If they sum to **more than 1.0**, they are scaled down proportionally (and a
+  warning is logged) so everything still fits — the *ratios* between bands are
+  preserved.
+- `BAND_CONTENT_FRACTION` (default `0.85`) controls how much of each band the
+  content fills, leaving a small margin so nothing touches the band edges.
+
+### Header and footer: text or image
+
+Each of the header and footer can be either text or an image, chosen per band:
+
+```python
+HEADER_MODE  = "text"            # or "image"
+HEADER_TEXT  = "Together we can beat 2026"
+HEADER_IMAGE = None              # path used when HEADER_MODE == "image"
+
+FOOTER_MODE  = "image"
+FOOTER_TEXT  = "Stronger Together"   # used as fallback if the image fails
+FOOTER_IMAGE = "/home/pi/CounterKiosk/footer.png"
+```
+
+- **Text** is rendered in `TEXT_COLOR` (white) and auto-sized so its height
+  fills the band's content area.
+- **Image** is loaded and scaled — preserving aspect ratio — so its height
+  fills the band's content area, then centered. Use a PNG with transparency or
+  a black background to blend with the display.
+- If a band's mode is `"image"` but the file is missing or unreadable, that band
+  **falls back to its text** so the display keeps working.
+
+Because images are scaled to the band height, size the artwork to the band's
+pixel height on your panel for a crisp result (e.g. a 0.18 header band on a
+1280×720 screen is ~130px tall, so a header image around 130px tall is ideal).
+
 ## Configuration reference (`config.py`)
 
 | Setting | Meaning |
@@ -231,9 +282,12 @@ The atomic-commit approach above covers the counter data itself.
 | `SEGMENT_ON` / `SEGMENT_OFF` | Lit / dim segment colors (red / faint red). |
 | `TEXT_COLOR` | Branding text color (white). |
 | `BACKGROUND` | Screen background (black). |
-| `HEADER_TEXT` / `FOOTER_TEXT` | Branding lines above / below the counter. |
+| `HEADER_HEIGHT_FRACTION` / `COUNTER_HEIGHT_FRACTION` / `FOOTER_HEIGHT_FRACTION` | Each band's height as a fraction of screen height (see Display layout). |
+| `BAND_CONTENT_FRACTION` | How much of each band the content fills (default 0.85, leaving a margin). |
+| `HEADER_MODE` / `FOOTER_MODE` | `"text"` or `"image"` for that band. |
+| `HEADER_TEXT` / `FOOTER_TEXT` | Text shown when the band mode is `"text"` (also the fallback if an image fails). |
+| `HEADER_IMAGE` / `FOOTER_IMAGE` | Image path shown when the band mode is `"image"`. |
 | `MIN_DIGITS` | Leading-zero padding width (set to 6 for a fixed 6-digit display, e.g. 000042). |
-| `COUNTER_HEIGHT_FRACTION`, `*_FONT_FRACTION` | Layout scaling vs. screen height. |
 | `FPS` | Event-poll cadence (10 on the Zero W; app only repaints on change). |
 | `SCREENSAVER_IMAGE` | Path to a screensaver image, or `None` to disable (pixel-shift only). |
 | `SCREENSAVER_IDLE_SECONDS` | Inactivity before the image appears (default 600 = 10 min). |

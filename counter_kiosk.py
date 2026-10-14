@@ -116,8 +116,17 @@ class KioskApp:
         self._buttons = ButtonSource(on_press=self._on_press)
         self._screen = None
         self._clock = None
-        self._header_font = None
-        self._footer_font = None
+        self._fonts_ok = False
+
+        # --- layout bands (computed at display init) ---
+        # Each is a dict: {"top": px, "height": px}. Content is drawn centered
+        # within its band and scaled to BAND_CONTENT_FRACTION of the band height.
+        self._bands = {"header": None, "counter": None, "footer": None}
+        # Pre-rendered header/footer content. Each is either a pygame Surface
+        # (text pre-rendered, or a scaled image) or None if there is nothing to
+        # show for that band.
+        self._header_surf = None
+        self._footer_surf = None
 
         # --- burn-in protection state ---
         # Timestamp (monotonic) of the last button press; drives the inactivity
@@ -167,7 +176,9 @@ class KioskApp:
 
         pygame.display.set_caption("Counter Kiosk")
         self._clock = pygame.time.Clock()
-        self._build_fonts()
+        self._compute_bands()
+        self._init_fonts()
+        self._build_band_content()
         self._load_screensaver()
 
     def _load_screensaver(self) -> None:
@@ -213,26 +224,148 @@ class KioskApp:
         except Exception:
             return 1024, 600
 
-    def _build_fonts(self) -> None:
-        h = self._screen.get_height()
-        header_px = max(12, int(h * config.HEADER_FONT_FRACTION))
-        footer_px = max(10, int(h * config.FOOTER_FONT_FRACTION))
-        # The counter is the critical element; branding text is secondary. If
-        # the font module fails to load for any reason, keep running with no
-        # text rather than crashing the kiosk.
+    def _compute_bands(self) -> None:
+        """Divide the screen into header / counter / footer bands.
+
+        Each band's height is its configured fraction of the screen height. If
+        the three fractions sum to more than 1.0 they are scaled down
+        proportionally (with a warning) so everything fits. Any leftover height
+        (when they sum to less than 1.0) becomes even spacing: half above the
+        header-counter stack is distributed as equal gaps between/around bands.
+        """
+        sh = self._screen.get_height()
+
+        hf = max(0.0, float(getattr(config, "HEADER_HEIGHT_FRACTION", 0.0)))
+        cf = max(0.0, float(getattr(config, "COUNTER_HEIGHT_FRACTION", 0.5)))
+        ff = max(0.0, float(getattr(config, "FOOTER_HEIGHT_FRACTION", 0.0)))
+
+        total = hf + cf + ff
+        if total > 1.0:
+            print(
+                f"[layout] band fractions sum to {total:.2f} (> 1.0); "
+                f"scaling them down proportionally to fit.",
+                file=sys.stderr,
+            )
+            hf, cf, ff = hf / total, cf / total, ff / total
+            total = 1.0
+
+        # Leftover becomes four equal gaps: above header, header↔counter,
+        # counter↔footer, below footer.
+        leftover = max(0.0, 1.0 - total)
+        gap = (leftover / 4.0) * sh
+
+        header_h = hf * sh
+        counter_h = cf * sh
+        footer_h = ff * sh
+
+        top = gap
+        self._bands["header"] = {"top": top, "height": header_h}
+        top += header_h + gap
+        self._bands["counter"] = {"top": top, "height": counter_h}
+        top += counter_h + gap
+        self._bands["footer"] = {"top": top, "height": footer_h}
+
+    def _init_fonts(self) -> None:
+        """Initialise the font subsystem. Fonts themselves are sized later, per
+        band, in _build_band_content. If fonts are unavailable the app keeps
+        running and simply omits any text bands."""
         try:
             if not pygame.font.get_init():
                 pygame.font.init()
-            self._header_font = pygame.font.SysFont(None, header_px, bold=True)
-            self._footer_font = pygame.font.SysFont(None, footer_px, bold=True)
+            self._fonts_ok = True
         except Exception as exc:  # pragma: no cover - environment dependent
             print(
                 f"[display] fonts unavailable ({exc!r}); "
-                f"rendering counter without branding text.",
+                f"text bands will be omitted.",
                 file=sys.stderr,
             )
-            self._header_font = None
-            self._footer_font = None
+            self._fonts_ok = False
+
+    def _render_band_text(self, text: str, band_height: float):
+        """Render ``text`` white, sized so its height ~= the band content area.
+
+        Returns a Surface, or None if fonts are unavailable or text is empty.
+        """
+        if not getattr(self, "_fonts_ok", False) or not text:
+            return None
+        target_h = max(1, int(band_height * config.BAND_CONTENT_FRACTION))
+        # SysFont's point size roughly tracks pixel height; size to the target
+        # then verify and nudge so we fill the band without overflowing it.
+        size = max(8, target_h)
+        try:
+            font = pygame.font.SysFont(None, size, bold=True)
+            surf = font.render(text, True, config.TEXT_COLOR)
+            # If the rendered height overshoots the band, scale the surface down
+            # to fit exactly (cheap, done once at init).
+            if surf.get_height() > band_height and surf.get_height() > 0:
+                scale = band_height / surf.get_height()
+                surf = pygame.transform.smoothscale(
+                    surf,
+                    (max(1, int(surf.get_width() * scale)),
+                     max(1, int(surf.get_height() * scale))),
+                )
+            return surf
+        except Exception as exc:  # pragma: no cover
+            print(f"[display] text render failed ({exc!r}).", file=sys.stderr)
+            return None
+
+    def _load_band_image(self, path: str, band_height: float):
+        """Load an image and scale it (aspect preserved) so its height fills the
+        band content area. Returns a Surface, or None on any failure."""
+        if not path or not os.path.isfile(path):
+            if path:
+                print(
+                    f"[display] band image not found at {path!r}; "
+                    f"falling back to text.",
+                    file=sys.stderr,
+                )
+            return None
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            target_h = max(1, int(band_height * config.BAND_CONTENT_FRACTION))
+            iw, ih = img.get_size()
+            scale = target_h / ih if ih else 1.0
+            new_size = (max(1, int(iw * scale)), max(1, int(ih * scale)))
+            scaled = pygame.transform.smoothscale(img, new_size)
+            print(f"[display] band image {path!r} scaled {iw}x{ih} -> {new_size}.")
+            return scaled
+        except Exception as exc:
+            print(
+                f"[display] failed to load band image {path!r} ({exc!r}); "
+                f"falling back to text.",
+                file=sys.stderr,
+            )
+            return None
+
+    def _build_band_surface(self, mode: str, text: str, image_path, band_height: float):
+        """Build the Surface for a header/footer band based on its mode.
+
+        mode == "image" tries the image first and falls back to text if the
+        image can't be loaded. mode == "text" (or anything else) uses text.
+        """
+        if band_height <= 0:
+            return None
+        if str(mode).lower() == "image":
+            surf = self._load_band_image(image_path, band_height)
+            if surf is not None:
+                return surf
+            # fall through to text on image failure
+        return self._render_band_text(text, band_height)
+
+    def _build_band_content(self) -> None:
+        """Pre-render the header and footer content once, at init."""
+        self._header_surf = self._build_band_surface(
+            getattr(config, "HEADER_MODE", "text"),
+            getattr(config, "HEADER_TEXT", ""),
+            getattr(config, "HEADER_IMAGE", None),
+            self._bands["header"]["height"],
+        )
+        self._footer_surf = self._build_band_surface(
+            getattr(config, "FOOTER_MODE", "text"),
+            getattr(config, "FOOTER_TEXT", ""),
+            getattr(config, "FOOTER_IMAGE", None),
+            self._bands["footer"]["height"],
+        )
 
     # --- burn-in protection --------------------------------------------------
 
@@ -291,48 +424,33 @@ class KioskApp:
 
     # --- rendering -----------------------------------------------------------
 
+    def _blit_band(self, surf, band, dx, dy) -> None:
+        """Center a pre-rendered band surface within its band slot."""
+        if surf is None or band is None:
+            return
+        sw = self._screen.get_width()
+        cx = sw / 2.0 + dx
+        cy = band["top"] + band["height"] / 2.0 + dy
+        self._screen.blit(surf, surf.get_rect(center=(cx, cy)))
+
     def _render(self, count: int, shift=(0, 0)) -> None:
         screen = self._screen
-        sw, sh = screen.get_size()
+        sw, _sh = screen.get_size()
         screen.fill(config.BACKGROUND)
 
         dx, dy = shift
-        top_margin = sh * 0.06 + dy
-        bottom_margin = sh * 0.06 - dy
 
-        # Header (top) and footer (bottom), centered horizontally. Skipped
-        # gracefully if fonts weren't available.
-        header_h = 0
-        footer_h = 0
-        if self._header_font is not None:
-            header = self._header_font.render(
-                config.HEADER_TEXT, True, config.TEXT_COLOR
-            )
-            header_h = header.get_height()
-            screen.blit(
-                header,
-                header.get_rect(center=(sw / 2 + dx, top_margin + header_h / 2)),
-            )
-        if self._footer_font is not None:
-            footer = self._footer_font.render(
-                config.FOOTER_TEXT, True, config.TEXT_COLOR
-            )
-            footer_h = footer.get_height()
-            screen.blit(
-                footer,
-                footer.get_rect(
-                    center=(sw / 2 + dx, sh - bottom_margin - footer_h / 2)
-                ),
-            )
+        # Header and footer: pre-rendered surfaces (text or image), centered in
+        # their bands. Either may be None (empty text / failed image / no fonts).
+        self._blit_band(self._header_surf, self._bands["header"], dx, dy)
+        self._blit_band(self._footer_surf, self._bands["footer"], dx, dy)
 
-        # Counter occupies the middle band between header and footer.
-        band_top = top_margin + header_h + sh * 0.04
-        band_bottom = sh - bottom_margin - footer_h - sh * 0.04
-        band_height = max(1.0, band_bottom - band_top)
-        band_center_y = (band_top + band_bottom) / 2.0
-
-        max_counter_h = min(band_height, sh * config.COUNTER_HEIGHT_FRACTION * 1.6)
+        # Counter: fill its band's content area, preserving the renderer's
+        # aspect handling. Width is capped to 90% of the screen.
+        cband = self._bands["counter"]
+        max_counter_h = max(1.0, cband["height"] * config.BAND_CONTENT_FRACTION)
         max_counter_w = sw * 0.9
+        band_center_y = cband["top"] + cband["height"] / 2.0 + dy
 
         self._renderer.draw_number(
             screen,
