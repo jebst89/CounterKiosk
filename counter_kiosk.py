@@ -193,7 +193,22 @@ class KioskApp:
     # --- display setup -------------------------------------------------------
 
     def _init_display(self) -> None:
-        pygame.init()
+        # This app plays no sound. pygame.init() would also start the audio
+        # mixer, which opens the HDMI/ALSA audio device and can produce a
+        # periodic pop/crackle through the monitor's speakers. Tell SDL not to
+        # init audio, initialise only the subsystems we actually use, and quit
+        # the mixer defensively in case something opened it.
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        pygame.display.init()
+        try:
+            pygame.font.init()
+        except Exception:
+            pass
+        try:
+            if pygame.mixer.get_init():
+                pygame.mixer.quit()
+        except Exception:
+            pass
         pygame.mouse.set_visible(False)
 
         fullscreen = os.environ.get("CK_FULLSCREEN", "1") != "0"

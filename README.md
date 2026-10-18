@@ -400,6 +400,25 @@ a prompt, responsive display. Apply both levers:
 Re-run the timing command after each change to confirm `draw` and `present`
 have dropped to tens of milliseconds.
 
+### Crackling / popping noise from the monitor speakers
+
+HDMI carries audio as well as video, and the noise is almost always the audio
+side, not a fault. The app plays no sound, so it initialises SDL **without**
+audio (`SDL_AUDIODRIVER=dummy`, no pygame mixer) to avoid opening the HDMI audio
+device and emitting pops. That is handled in code and needs no action.
+
+If a crackle still comes from the monitor's speakers, disable HDMI audio on the
+Pi. Edit the firmware config (`/boot/firmware/config.txt` on Bookworm, or
+`/boot/config.txt` on older releases) and set:
+
+```
+hdmi_drive=1
+```
+
+`hdmi_drive=1` selects DVI mode (video only, no HDMI audio). Reboot afterwards.
+Alternatively, if the monitor has a volume control or a mute, muting its
+speakers also stops the noise since nothing in this project needs sound.
+
 ## Future: AWS IoT
 
 All persistence is behind `CounterStore` in `storage.py`. To publish counts to
