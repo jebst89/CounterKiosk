@@ -90,14 +90,37 @@ DIGIT_GAP_FRACTION = 0.25
 FPS = 10
 
 # Number of times each new frame is drawn+flipped so it lands in every buffer
-# of a (double/triple) buffered display. With a buffered framebuffer, a single
-# flip() shows the PREVIOUS frame and the one you just drew only appears on the
-# next flip — which, since this kiosk only redraws on a press, made each press
-# show up one press late. Drawing into every buffer fixes that.
-#   2 -> double buffering (the common case; correct for most HDMI/kmsdrm setups)
-#   3 -> triple buffering (use if 2 still shows a one-press-late image)
-#   1 -> single/unbuffered (no repeat; only if you are sure it is not buffered)
-BUFFER_FLIPS = 2
+# of a buffered display. On a slow board each extra flip costs a full frame
+# redraw, so keep this at 1 unless you actually see a one-frame-late image.
+#   1 -> default; one draw + one flip per update (fastest)
+#   2 -> double buffering (only if the display shows the previous frame)
+#   3 -> triple buffering
+BUFFER_FLIPS = 1
+
+# --- Display: performance -----------------------------------------------------
+#
+# On a slow single-core board (the Pi Zero W) software rendering to a large
+# framebuffer is expensive: every fill/blit/flip copies the whole screen on one
+# CPU core. If draw/flip are slow (run with CK_TIMING=1 to measure), the two
+# biggest levers are:
+#
+#   1. Lower the HDMI resolution (see README "Troubleshooting") — this shrinks
+#      the real framebuffer so flip() itself moves far fewer pixels.
+#   2. RENDER_SCALE below — draw the frame to a smaller off-screen surface, then
+#      scale it up once to the screen. Fewer pixels drawn = faster. 1.0 draws at
+#      full screen resolution; 0.5 draws at half (quarter the pixels) and
+#      upscales. Values between 0.4 and 0.7 are a good tradeoff on the Zero W.
+#
+# Set to 0.5 because the panel reports 1920x1080, which is far too many pixels
+# for the Zero W to fill in software at a usable speed. For the biggest win,
+# ALSO lower the HDMI resolution to 720p or 480p (see README Troubleshooting);
+# that shrinks the real framebuffer so flip() moves fewer pixels too.
+RENDER_SCALE = 0.5
+
+# Ask SDL not to wait for vsync on flip(). On some drivers flip() blocks for a
+# full refresh (or longer if vsync is misreported), adding latency. Disabling it
+# presents immediately. Set False if you see tearing and prefer vsync.
+VSYNC = False
 
 # --- Burn-in protection -------------------------------------------------------
 #

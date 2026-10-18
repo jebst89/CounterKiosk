@@ -121,7 +121,9 @@ class KioskApp:
         )
 
         self._buttons = ButtonSource(on_press=self._on_press)
-        self._screen = None
+        self._window = None   # the real display surface
+        self._screen = None   # where we draw (render surface; may be smaller)
+        self._needs_upscale = False
         self._clock = None
         self._fonts_ok = False
 
@@ -195,12 +197,38 @@ class KioskApp:
         pygame.mouse.set_visible(False)
 
         fullscreen = os.environ.get("CK_FULLSCREEN", "1") != "0"
+        vsync = 1 if getattr(config, "VSYNC", False) else 0
         if fullscreen:
-            # (0, 0) tells SDL to use the current desktop / native resolution.
-            self._screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            flags = pygame.FULLSCREEN
+            try:
+                # (0, 0) tells SDL to use the current desktop / native
+                # resolution. vsync=0 asks SDL not to block on refresh, which
+                # removes the per-flip wait that dominates latency on the Zero W.
+                self._window = pygame.display.set_mode((0, 0), flags, vsync=vsync)
+            except (TypeError, pygame.error):
+                # Older pygame/SDL without the vsync kwarg.
+                self._window = pygame.display.set_mode((0, 0), flags)
         else:
             w, h = self._parse_window_size(os.environ.get("CK_WINDOW", "1024x600"))
-            self._screen = pygame.display.set_mode((w, h))
+            try:
+                self._window = pygame.display.set_mode((w, h), vsync=vsync)
+            except (TypeError, pygame.error):
+                self._window = pygame.display.set_mode((w, h))
+
+        # Rendering surface. When RENDER_SCALE < 1.0 we draw to a smaller
+        # off-screen surface and upscale once per frame on present — far fewer
+        # pixels to fill/blit, which is the main cost on a single-core board.
+        scale = float(getattr(config, "RENDER_SCALE", 1.0))
+        scale = min(1.0, max(0.1, scale))
+        ww, wh = self._window.get_size()
+        if scale < 0.999:
+            self._render_size = (max(1, int(ww * scale)), max(1, int(wh * scale)))
+            self._screen = pygame.Surface(self._render_size)
+            self._needs_upscale = True
+        else:
+            self._render_size = (ww, wh)
+            self._screen = self._window
+            self._needs_upscale = False
 
         pygame.display.set_caption("Counter Kiosk")
         self._clock = pygame.time.Clock()
@@ -495,25 +523,28 @@ class KioskApp:
         )
 
     def _present(self) -> None:
-        """Flip the freshly drawn frame to the screen.
+        """Push the freshly drawn frame to the screen.
 
-        The display is (double- or triple-) buffered, so a single flip() only
-        puts the new frame into the buffer that becomes the *back* buffer next
-        time — the viewer keeps seeing the previous frame until something draws
-        again. Because the kiosk only redraws on a press (or a slow pixel-shift
-        tick), that made every press appear one cycle late — i.e. the display
-        was always showing the previous count until the next press.
-        To fix it, we draw the current frame into every buffer in the chain by
-        re-drawing and flipping BUFFER_FLIPS times, so whichever buffer the
-        driver presents, it holds the current frame.
+        If RENDER_SCALE < 1.0, the frame was drawn to a smaller off-screen
+        surface; scale it up onto the window once here. Then flip.
+
+        BUFFER_FLIPS controls how many buffers in the chain get the current
+        frame. Default 1 (one draw, one flip) is fastest; raise it only if the
+        display shows the previous frame (buffer-swap lag).
         """
-        flips = max(1, int(getattr(config, "BUFFER_FLIPS", 2)))
-        # The caller has already drawn once into the current back buffer; flip
-        # it, then redraw+flip for the remaining buffers.
-        pygame.display.flip()
+        flips = max(1, int(getattr(config, "BUFFER_FLIPS", 1)))
+
+        def blit_and_flip():
+            if self._needs_upscale:
+                pygame.transform.scale(
+                    self._screen, self._window.get_size(), self._window
+                )
+            pygame.display.flip()
+
+        blit_and_flip()
         for _ in range(flips - 1):
             self._redraw_current()
-            pygame.display.flip()
+            blit_and_flip()
 
     def _redraw_current(self) -> None:
         """Redraw whatever is currently on screen (counter or screensaver) into

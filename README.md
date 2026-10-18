@@ -289,7 +289,9 @@ pixel height on your panel for a crisp result (e.g. a 0.18 header band on a
 | `HEADER_IMAGE` / `FOOTER_IMAGE` | Image path shown when the band mode is `"image"`. |
 | `MIN_DIGITS` | Leading-zero padding width (set to 6 for a fixed 6-digit display, e.g. 000042). |
 | `FPS` | Event-poll cadence (10 on the Zero W; app only repaints on change). |
-| `BUFFER_FLIPS` | Times each frame is drawn into the buffer chain (2 = double buffering; use 3 for triple). |
+| `BUFFER_FLIPS` | Times each frame is drawn into the buffer chain (1 = fastest; raise only if a frame-late image appears). |
+| `RENDER_SCALE` | Draw to an off-screen surface this fraction of screen size, then upscale (lower = faster on slow boards). |
+| `VSYNC` | Whether `flip()` waits for vsync (`False` presents immediately; set `True` only if you see tearing). |
 | `SCREENSAVER_IMAGE` | Path to a screensaver image, or `None` to disable (pixel-shift only). |
 | `SCREENSAVER_IDLE_SECONDS` | Inactivity before the image appears (default 600 = 10 min). |
 | `SCREENSAVER_DURATION_SECONDS` | How long the image shows before returning to the counter (default 20). |
@@ -328,24 +330,60 @@ most of the time while staying instantly responsive to a press.
 
 ## Troubleshooting
 
-**The screen updates one press late (shows the previous number, then catches up
-on the next press).** This is a buffered-display effect: the framebuffer is
-double- (or triple-) buffered, so a single `flip()` presents the *other* buffer
-and the frame you just drew only appears on the next flip. Because the kiosk
-only redraws on a press, every press appeared one press behind. The app fixes
-this by drawing each frame into every buffer (`BUFFER_FLIPS`, default 2). If you
-still see a one-press lag, set `BUFFER_FLIPS = 3` in `config.py` (triple
-buffering). To diagnose, run with timing enabled and watch the `press->onscreen`
-figure:
+### Diagnosing display lag
+
+Run manually with timing enabled and press the button a few times:
 
 ```bash
+sudo systemctl stop counter-kiosk.service   # free the screen first
+cd /home/pi/CounterKiosk
 SDL_VIDEODRIVER=kmsdrm GPIOZERO_PIN_FACTORY=lgpio CK_TIMING=1 .venv/bin/python counter_kiosk.py
 ```
 
-**The counter feels generally sluggish on a high-resolution screen.** The Zero W
-redraws the whole frame; at very high resolutions the per-frame fill/blit cost
-on ARMv6 adds up. Force a lower HDMI mode (e.g. 1280×720) in
-`/boot/firmware/config.txt` — the layout scales to whatever the screen reports.
+Each press prints something like:
+
+```
+[timing] render: draw=12.3ms present=20.1ms count=5 press->onscreen=35.0ms
+```
+
+Read it like this:
+
+- **`present` is large (hundreds of ms or seconds):** `flip()` is the bottleneck
+  — the display push is slow, usually a vsync/driver issue or simply too many
+  pixels. Fixes: set `VSYNC = False` (already the default), lower the HDMI
+  resolution, and/or lower `RENDER_SCALE`.
+- **`draw` is large:** rendering the frame is slow, which on the single-core
+  Zero W means the framebuffer is just too big for software drawing. Fixes:
+  lower the HDMI resolution and/or `RENDER_SCALE`.
+- **`press->onscreen` is large but `draw` and `present` are both small:** the
+  delay is before rendering (input/loop); send the numbers along.
+
+### Fixing display lag on the Pi Zero W
+
+The Zero W is a single-core ARMv6 doing all rendering in software, so cost
+scales with the number of pixels. Two levers, most effective first:
+
+1. **Lower the HDMI resolution.** Fewer pixels makes every fill/blit/flip
+   faster. Edit `/boot/firmware/config.txt` to force 720p and reboot:
+
+   ```
+   hdmi_group=1
+   hdmi_mode=4      # 1280x720 @ 60Hz
+   ```
+
+   For an even bigger speedup, 848×480 (`hdmi_group=2`, `hdmi_mode=87`,
+   `hdmi_cvt=848 480 60`) cuts the pixel count further. The layout auto-scales
+   to whatever the screen reports, so no code change is needed.
+
+2. **Lower `RENDER_SCALE`** in `config.py`. The app draws to a smaller
+   off-screen surface and upscales once per frame, so e.g. `RENDER_SCALE = 0.5`
+   draws a quarter of the pixels. Values of 0.4–0.7 look fine for big digits.
+
+3. Keep `VSYNC = False` and `BUFFER_FLIPS = 1` (the defaults) so `flip()` does
+   not block and each frame is pushed exactly once.
+
+Re-run the timing command after each change to confirm `draw` and `present`
+have dropped to tens of milliseconds.
 
 ## Future: AWS IoT
 
