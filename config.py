@@ -89,13 +89,17 @@ DIGIT_GAP_FRACTION = 0.25
 # for a button press.
 FPS = 10
 
-# Number of times each new frame is drawn+flipped so it lands in every buffer
-# of a buffered display. On a slow board each extra flip costs a full frame
-# redraw, so keep this at 1 unless you actually see a one-frame-late image.
-#   1 -> default; one draw + one flip per update (fastest)
-#   2 -> double buffering (only if the display shows the previous frame)
+# How many times the finished frame is copied to the display buffers per update.
+# The physical display is usually double-buffered, so a single flip() presents
+# the OTHER buffer and the frame you just drew would only appear on the next
+# flip — the classic "shows the previous count" lag. The frame is drawn once to
+# an off-screen buffer and this only controls how many cheap copy+flip passes
+# fill the buffer chain, so 2 is correct and inexpensive. Raise to 3 only if a
+# one-frame-late image persists (triple buffering).
+#   2 -> default; correct for a double-buffered display
 #   3 -> triple buffering
-BUFFER_FLIPS = 1
+#   1 -> only if you are certain the display is single-buffered
+BUFFER_FLIPS = 2
 
 # --- Display: performance -----------------------------------------------------
 #
@@ -117,9 +121,10 @@ BUFFER_FLIPS = 1
 # that shrinks the real framebuffer so flip() moves fewer pixels too.
 RENDER_SCALE = 0.5
 
-# Ask SDL not to wait for vsync on flip(). On some drivers flip() blocks for a
-# full refresh (or longer if vsync is misreported), adding latency. Disabling it
-# presents immediately. Set False if you see tearing and prefer vsync.
+# Whether flip() waits for vsync. On some drivers vsync makes flip() block for a
+# full refresh (or longer if misreported), adding latency, so this defaults to
+# False to present immediately. Set True only if you see tearing and prefer a
+# vsync-locked image.
 VSYNC = False
 
 # --- Burn-in protection -------------------------------------------------------

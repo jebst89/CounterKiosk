@@ -361,23 +361,38 @@ Read it like this:
 ### Fixing display lag on the Pi Zero W
 
 The Zero W is a single-core ARMv6 doing all rendering in software, so cost
-scales with the number of pixels. Two levers, most effective first:
+scales with the number of pixels. A 1920×1080 panel (~2M pixels) is too much to
+fill/flip in software and produces multi-second lag; the fix is to cut the pixel
+count.
+
+**Known-good configuration:** lowering the HDMI output to 720p (or 480p) *and*
+setting `RENDER_SCALE = 0.5` brings a 1080p panel from multi-second lag down to
+a prompt, responsive display. Apply both levers:
 
 1. **Lower the HDMI resolution.** Fewer pixels makes every fill/blit/flip
-   faster. Edit `/boot/firmware/config.txt` to force 720p and reboot:
+   faster. Edit the firmware config and reboot. The file is
+   `/boot/firmware/config.txt` on Bookworm, or `/boot/config.txt` on older
+   releases — check with
+   `ls -l /boot/firmware/config.txt /boot/config.txt 2>/dev/null`. Add, for
+   720p:
 
    ```
    hdmi_group=1
    hdmi_mode=4      # 1280x720 @ 60Hz
    ```
 
-   For an even bigger speedup, 848×480 (`hdmi_group=2`, `hdmi_mode=87`,
-   `hdmi_cvt=848 480 60`) cuts the pixel count further. The layout auto-scales
-   to whatever the screen reports, so no code change is needed.
+   For an even bigger speedup, 640×480 (`hdmi_group=1`, `hdmi_mode=1`) or 848×480
+   (`hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt=848 480 60`) cut the pixel count
+   further. The layout auto-scales to whatever the screen reports, so no code
+   change is needed. Confirm after reboot with `fbset -s`.
 
 2. **Lower `RENDER_SCALE`** in `config.py`. The app draws to a smaller
    off-screen surface and upscales once per frame, so e.g. `RENDER_SCALE = 0.5`
-   draws a quarter of the pixels. Values of 0.4–0.7 look fine for big digits.
+   draws a quarter of the pixels. Values of 0.4–0.7 look fine for the big
+   digits. Note this also softens header/footer **images** slightly, since they
+   are drawn at the reduced scale and upscaled; if sharp banner art matters more
+   than speed, raise `RENDER_SCALE` toward 1.0 and lean on the lower HDMI
+   resolution instead.
 
 3. Keep `VSYNC = False` and `BUFFER_FLIPS = 1` (the defaults) so `flip()` does
    not block and each frame is pushed exactly once.

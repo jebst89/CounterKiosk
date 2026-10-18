@@ -215,20 +215,20 @@ class KioskApp:
             except (TypeError, pygame.error):
                 self._window = pygame.display.set_mode((w, h))
 
-        # Rendering surface. When RENDER_SCALE < 1.0 we draw to a smaller
-        # off-screen surface and upscale once per frame on present — far fewer
-        # pixels to fill/blit, which is the main cost on a single-core board.
+        # Rendering surface. We ALWAYS draw to an off-screen buffer, then copy
+        # it to the window in _present(). This has two benefits:
+        #   * RENDER_SCALE < 1.0 draws fewer pixels (cheap) and upscales once.
+        #   * Filling both display buffers (for double buffering) is a cheap
+        #     blit of this ready-made surface, not a second full redraw — so
+        #     BUFFER_FLIPS costs almost nothing beyond the extra flip.
         scale = float(getattr(config, "RENDER_SCALE", 1.0))
         scale = min(1.0, max(0.1, scale))
         ww, wh = self._window.get_size()
-        if scale < 0.999:
-            self._render_size = (max(1, int(ww * scale)), max(1, int(wh * scale)))
-            self._screen = pygame.Surface(self._render_size)
-            self._needs_upscale = True
-        else:
-            self._render_size = (ww, wh)
-            self._screen = self._window
-            self._needs_upscale = False
+        self._render_size = (max(1, int(ww * scale)), max(1, int(wh * scale)))
+        self._screen = pygame.Surface(self._render_size)
+        # Whether the off-screen buffer differs in size from the window (and so
+        # must be scaled rather than blitted 1:1 on present).
+        self._needs_upscale = self._render_size != (ww, wh)
 
         pygame.display.set_caption("Counter Kiosk")
         self._clock = pygame.time.Clock()
@@ -365,9 +365,11 @@ class KioskApp:
             print(f"[display] text render failed ({exc!r}).", file=sys.stderr)
             return None
 
-    def _load_band_image(self, path: str, band_height: float):
-        """Load an image and scale it (aspect preserved) so its height fills the
-        band content area. Returns a Surface, or None on any failure."""
+    def _load_band_image(self, path: str, band_height: float, max_width: float):
+        """Load an image and scale it (aspect preserved) to be as large as it
+        can be within the band: its height fills the band content area, but if
+        that would make it wider than ``max_width`` it is limited by width
+        instead. Returns a Surface, or None on any failure."""
         if not path or not os.path.isfile(path):
             if path:
                 print(
@@ -380,10 +382,18 @@ class KioskApp:
             img = pygame.image.load(path).convert_alpha()
             target_h = max(1, int(band_height * config.BAND_CONTENT_FRACTION))
             iw, ih = img.get_size()
-            scale = target_h / ih if ih else 1.0
+            # Scale by height, then clamp by width so a wide banner never spills
+            # off the screen. Take the smaller scale factor of the two limits.
+            scale_h = target_h / ih if ih else 1.0
+            scale_w = (max_width / iw) if (iw and max_width > 0) else scale_h
+            scale = min(scale_h, scale_w)
             new_size = (max(1, int(iw * scale)), max(1, int(ih * scale)))
             scaled = pygame.transform.smoothscale(img, new_size)
-            print(f"[display] band image {path!r} scaled {iw}x{ih} -> {new_size}.")
+            print(
+                f"[display] band image {path!r} scaled {iw}x{ih} -> {new_size} "
+                f"(band_h={int(band_height)}, max_w={int(max_width)}).",
+                file=sys.stderr,
+            )
             return scaled
         except Exception as exc:
             print(
@@ -393,7 +403,8 @@ class KioskApp:
             )
             return None
 
-    def _build_band_surface(self, mode: str, text: str, image_path, band_height: float):
+    def _build_band_surface(self, mode: str, text: str, image_path,
+                             band_height: float, max_width: float):
         """Build the Surface for a header/footer band based on its mode.
 
         mode == "image" tries the image first and falls back to text if the
@@ -402,7 +413,7 @@ class KioskApp:
         if band_height <= 0:
             return None
         if str(mode).lower() == "image":
-            surf = self._load_band_image(image_path, band_height)
+            surf = self._load_band_image(image_path, band_height, max_width)
             if surf is not None:
                 return surf
             # fall through to text on image failure
@@ -410,17 +421,21 @@ class KioskApp:
 
     def _build_band_content(self) -> None:
         """Pre-render the header and footer content once, at init."""
+        # Images may use the full render-surface width (banners run edge to edge).
+        max_width = self._screen.get_width()
         self._header_surf = self._build_band_surface(
             getattr(config, "HEADER_MODE", "text"),
             getattr(config, "HEADER_TEXT", ""),
             getattr(config, "HEADER_IMAGE", None),
             self._bands["header"]["height"],
+            max_width,
         )
         self._footer_surf = self._build_band_surface(
             getattr(config, "FOOTER_MODE", "text"),
             getattr(config, "FOOTER_TEXT", ""),
             getattr(config, "FOOTER_IMAGE", None),
             self._bands["footer"]["height"],
+            max_width,
         )
 
     # --- burn-in protection --------------------------------------------------
@@ -523,36 +538,25 @@ class KioskApp:
         )
 
     def _present(self) -> None:
-        """Push the freshly drawn frame to the screen.
+        """Push the already-drawn off-screen buffer to the screen.
 
-        If RENDER_SCALE < 1.0, the frame was drawn to a smaller off-screen
-        surface; scale it up onto the window once here. Then flip.
-
-        BUFFER_FLIPS controls how many buffers in the chain get the current
-        frame. Default 1 (one draw, one flip) is fastest; raise it only if the
-        display shows the previous frame (buffer-swap lag).
+        The frame lives on self._screen (an off-screen surface). We copy it to
+        the window — scaling if RENDER_SCALE shrank it — and flip. Because the
+        physical display is typically double-buffered, a single flip() presents
+        the OTHER buffer, so the frame you just pushed would not appear until the
+        next flip (the "shows the previous count" symptom). We therefore copy +
+        flip BUFFER_FLIPS times so every buffer in the chain holds the current
+        frame. The copy is a cheap blit/scale of the ready-made surface, not a
+        second full redraw, so the extra flip costs very little.
         """
-        flips = max(1, int(getattr(config, "BUFFER_FLIPS", 1)))
-
-        def blit_and_flip():
+        flips = max(1, int(getattr(config, "BUFFER_FLIPS", 2)))
+        win_size = self._window.get_size()
+        for _ in range(flips):
             if self._needs_upscale:
-                pygame.transform.scale(
-                    self._screen, self._window.get_size(), self._window
-                )
+                pygame.transform.scale(self._screen, win_size, self._window)
+            else:
+                self._window.blit(self._screen, (0, 0))
             pygame.display.flip()
-
-        blit_and_flip()
-        for _ in range(flips - 1):
-            self._redraw_current()
-            blit_and_flip()
-
-    def _redraw_current(self) -> None:
-        """Redraw whatever is currently on screen (counter or screensaver) into
-        the back buffer, used to fill additional buffers in _present()."""
-        if self._saver_active:
-            self._draw_screensaver()
-        else:
-            self._draw_counter(self._present_count, self._shift)
 
     def _render(self, count: int, shift=(0, 0)) -> None:
         if self._timing:
