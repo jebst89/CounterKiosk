@@ -145,6 +145,9 @@ class KioskApp:
         self._saver_active = False
         # The pixel-shift offset last applied, so we know when to repaint.
         self._shift = (0, 0)
+        # The count currently being presented, so additional buffer fills in
+        # _present()/_redraw_current() repaint the same frame.
+        self._present_count = self._count
 
         # Timing instrumentation (set CK_TIMING=1 to enable). Prints how long
         # the draw and flip take and the press->render gap, so performance
@@ -437,15 +440,19 @@ class KioskApp:
         phase = (idle - idle_secs) % (idle_secs + dur_secs)
         return phase < dur_secs
 
-    def _render_screensaver(self) -> None:
-        """Fill the screen black and center the screensaver image on it."""
+    def _draw_screensaver(self) -> None:
+        """Draw the screensaver frame into the back buffer (no flip)."""
         screen = self._screen
         screen.fill(config.BACKGROUND)
         if self._screensaver_img is not None:
             sw, sh = screen.get_size()
             rect = self._screensaver_img.get_rect(center=(sw / 2, sh / 2))
             screen.blit(self._screensaver_img, rect)
-        pygame.display.flip()
+
+    def _render_screensaver(self) -> None:
+        """Draw and present the screensaver, filling all buffers (see _present)."""
+        self._draw_screensaver()
+        self._present()
 
     # --- rendering -----------------------------------------------------------
 
@@ -458,9 +465,8 @@ class KioskApp:
         cy = band["top"] + band["height"] / 2.0 + dy
         self._screen.blit(surf, surf.get_rect(center=(cx, cy)))
 
-    def _render(self, count: int, shift=(0, 0)) -> None:
-        if self._timing:
-            self._t_render_start = time.monotonic()
+    def _draw_counter(self, count: int, shift=(0, 0)) -> None:
+        """Draw the full counter frame into the back buffer (no flip)."""
         screen = self._screen
         sw, _sh = screen.get_size()
         screen.fill(config.BACKGROUND)
@@ -488,9 +494,45 @@ class KioskApp:
             min_digits=config.MIN_DIGITS,
         )
 
+    def _present(self) -> None:
+        """Flip the freshly drawn frame to the screen.
+
+        The display is (double- or triple-) buffered, so a single flip() only
+        puts the new frame into the buffer that becomes the *back* buffer next
+        time — the viewer keeps seeing the previous frame until something draws
+        again. Because the kiosk only redraws on a press (or a slow pixel-shift
+        tick), that made every press appear one cycle late — i.e. the display
+        was always showing the previous count until the next press.
+        To fix it, we draw the current frame into every buffer in the chain by
+        re-drawing and flipping BUFFER_FLIPS times, so whichever buffer the
+        driver presents, it holds the current frame.
+        """
+        flips = max(1, int(getattr(config, "BUFFER_FLIPS", 2)))
+        # The caller has already drawn once into the current back buffer; flip
+        # it, then redraw+flip for the remaining buffers.
+        pygame.display.flip()
+        for _ in range(flips - 1):
+            self._redraw_current()
+            pygame.display.flip()
+
+    def _redraw_current(self) -> None:
+        """Redraw whatever is currently on screen (counter or screensaver) into
+        the back buffer, used to fill additional buffers in _present()."""
+        if self._saver_active:
+            self._draw_screensaver()
+        else:
+            self._draw_counter(self._present_count, self._shift)
+
+    def _render(self, count: int, shift=(0, 0)) -> None:
+        if self._timing:
+            self._t_render_start = time.monotonic()
+        # Remember what we're presenting so _redraw_current can repaint it.
+        self._present_count = count
+        self._draw_counter(count, shift)
+
         if self._timing:
             t_draw = time.monotonic()
-            pygame.display.flip()
+            self._present()
             t_flip = time.monotonic()
             gap = ""
             if self._t_press:
@@ -498,11 +540,11 @@ class KioskApp:
                 self._t_press = 0.0
             print(
                 f"[timing] render: draw={1000*(t_draw - self._t_render_start):.1f}ms "
-                f"flip={1000*(t_flip - t_draw):.1f}ms count={count}{gap}",
+                f"present={1000*(t_flip - t_draw):.1f}ms count={count}{gap}",
                 file=sys.stderr,
             )
         else:
-            pygame.display.flip()
+            self._present()
 
     # --- main loop -----------------------------------------------------------
 

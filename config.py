@@ -89,6 +89,16 @@ DIGIT_GAP_FRACTION = 0.25
 # for a button press.
 FPS = 10
 
+# Number of times each new frame is drawn+flipped so it lands in every buffer
+# of a (double/triple) buffered display. With a buffered framebuffer, a single
+# flip() shows the PREVIOUS frame and the one you just drew only appears on the
+# next flip — which, since this kiosk only redraws on a press, made each press
+# show up one press late. Drawing into every buffer fixes that.
+#   2 -> double buffering (the common case; correct for most HDMI/kmsdrm setups)
+#   3 -> triple buffering (use if 2 still shows a one-press-late image)
+#   1 -> single/unbuffered (no repeat; only if you are sure it is not buffered)
+BUFFER_FLIPS = 2
+
 # --- Burn-in protection -------------------------------------------------------
 #
 # Two layers protect the LCD from image persistence / burn-in when the counter

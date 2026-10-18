@@ -289,6 +289,7 @@ pixel height on your panel for a crisp result (e.g. a 0.18 header band on a
 | `HEADER_IMAGE` / `FOOTER_IMAGE` | Image path shown when the band mode is `"image"`. |
 | `MIN_DIGITS` | Leading-zero padding width (set to 6 for a fixed 6-digit display, e.g. 000042). |
 | `FPS` | Event-poll cadence (10 on the Zero W; app only repaints on change). |
+| `BUFFER_FLIPS` | Times each frame is drawn into the buffer chain (2 = double buffering; use 3 for triple). |
 | `SCREENSAVER_IMAGE` | Path to a screensaver image, or `None` to disable (pixel-shift only). |
 | `SCREENSAVER_IDLE_SECONDS` | Inactivity before the image appears (default 600 = 10 min). |
 | `SCREENSAVER_DURATION_SECONDS` | How long the image shows before returning to the counter (default 20). |
@@ -324,6 +325,27 @@ kiosk keeps showing the count.
 Defaults: image off, 10-minute idle trigger, 20-second display. For a kiosk
 that may sit untouched overnight, the 10-minute trigger keeps the panel resting
 most of the time while staying instantly responsive to a press.
+
+## Troubleshooting
+
+**The screen updates one press late (shows the previous number, then catches up
+on the next press).** This is a buffered-display effect: the framebuffer is
+double- (or triple-) buffered, so a single `flip()` presents the *other* buffer
+and the frame you just drew only appears on the next flip. Because the kiosk
+only redraws on a press, every press appeared one press behind. The app fixes
+this by drawing each frame into every buffer (`BUFFER_FLIPS`, default 2). If you
+still see a one-press lag, set `BUFFER_FLIPS = 3` in `config.py` (triple
+buffering). To diagnose, run with timing enabled and watch the `press->onscreen`
+figure:
+
+```bash
+SDL_VIDEODRIVER=kmsdrm GPIOZERO_PIN_FACTORY=lgpio CK_TIMING=1 .venv/bin/python counter_kiosk.py
+```
+
+**The counter feels generally sluggish on a high-resolution screen.** The Zero W
+redraws the whole frame; at very high resolutions the per-frame fill/blit cost
+on ARMv6 adds up. Force a lower HDMI mode (e.g. 1280×720) in
+`/boot/firmware/config.txt` — the layout scales to whatever the screen reports.
 
 ## Future: AWS IoT
 
