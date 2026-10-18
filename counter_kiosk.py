@@ -106,6 +106,13 @@ class KioskApp:
         # GPIO callback thread and the main render thread.
         self._lock = threading.Lock()
         self._dirty = True  # force an initial draw
+        # Signalled by the button callback (which runs on a gpiozero background
+        # thread) to wake the render loop immediately. The loop waits on this
+        # with a short timeout, so a press is reflected on screen within a few
+        # milliseconds instead of waiting for the next poll tick. This decouples
+        # redraw latency from pygame's event pump, which can stall on a headless
+        # framebuffer and was the cause of the multi-second display lag.
+        self._wake = threading.Event()
 
         self._renderer = SevenSegmentRenderer(
             on_color=config.SEGMENT_ON,
@@ -152,6 +159,8 @@ class KioskApp:
             self._count = new_value
             self._dirty = True
             self._last_activity = time.monotonic()
+        # Wake the render loop right away so the new count appears immediately.
+        self._wake.set()
         print(f"[press] count = {new_value}")
 
     def _snapshot(self):
@@ -468,8 +477,23 @@ class KioskApp:
     def run(self) -> None:
         self._init_display()
         running = True
+        # How long the loop sleeps between iterations when nothing has happened.
+        # A button press wakes it sooner via self._wake, so this only governs
+        # the cadence of time-based effects (pixel-shift, screensaver cycling),
+        # not how quickly a press shows up.
+        idle_poll = 1.0 / max(1, config.FPS)
         try:
             while running:
+                # Wait for a press-wake or until the poll interval elapses,
+                # whichever comes first. This is what makes a press appear
+                # immediately regardless of pygame's event pump.
+                woke = self._wake.wait(timeout=idle_poll)
+                if woke:
+                    self._wake.clear()
+
+                # Pump pygame events so the window stays responsive and so the
+                # keyboard-simulation path (dev machines) and quit/ESC work.
+                # We do NOT depend on these events for counter latency.
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         running = False
@@ -514,7 +538,8 @@ class KioskApp:
                         self._shift = shift
                         self._render(count, shift)
 
-                self._clock.tick(config.FPS)
+                # Pacing is handled by self._wake.wait(timeout=idle_poll) at the
+                # top of the loop, so no separate clock.tick() is needed here.
         finally:
             self._shutdown()
 
