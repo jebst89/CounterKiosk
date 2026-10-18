@@ -146,6 +146,13 @@ class KioskApp:
         # The pixel-shift offset last applied, so we know when to repaint.
         self._shift = (0, 0)
 
+        # Timing instrumentation (set CK_TIMING=1 to enable). Prints how long
+        # the draw and flip take and the press->render gap, so performance
+        # problems can be measured on the real hardware instead of guessed at.
+        self._timing = os.environ.get("CK_TIMING") == "1"
+        self._t_render_start = 0.0
+        self._t_press = 0.0
+
     # --- state ---------------------------------------------------------------
 
     def _on_press(self) -> None:
@@ -154,13 +161,22 @@ class KioskApp:
         A press always counts, even while the screensaver is showing — the
         screensaver is dismissed by the activity timestamp being refreshed here.
         """
+        t0 = time.monotonic()
         new_value = self._store.increment()
         with self._lock:
             self._count = new_value
             self._dirty = True
-            self._last_activity = time.monotonic()
+            self._last_activity = t0
+            if self._timing:
+                self._t_press = t0
         # Wake the render loop right away so the new count appears immediately.
         self._wake.set()
+        if self._timing:
+            print(
+                f"[timing] press handled: increment+store={1000*(time.monotonic()-t0):.1f}ms "
+                f"count={new_value}",
+                file=sys.stderr,
+            )
         print(f"[press] count = {new_value}")
 
     def _snapshot(self):
@@ -443,6 +459,8 @@ class KioskApp:
         self._screen.blit(surf, surf.get_rect(center=(cx, cy)))
 
     def _render(self, count: int, shift=(0, 0)) -> None:
+        if self._timing:
+            self._t_render_start = time.monotonic()
         screen = self._screen
         sw, _sh = screen.get_size()
         screen.fill(config.BACKGROUND)
@@ -470,7 +488,21 @@ class KioskApp:
             min_digits=config.MIN_DIGITS,
         )
 
-        pygame.display.flip()
+        if self._timing:
+            t_draw = time.monotonic()
+            pygame.display.flip()
+            t_flip = time.monotonic()
+            gap = ""
+            if self._t_press:
+                gap = f" press->onscreen={1000*(t_flip - self._t_press):.1f}ms"
+                self._t_press = 0.0
+            print(
+                f"[timing] render: draw={1000*(t_draw - self._t_render_start):.1f}ms "
+                f"flip={1000*(t_flip - t_draw):.1f}ms count={count}{gap}",
+                file=sys.stderr,
+            )
+        else:
+            pygame.display.flip()
 
     # --- main loop -----------------------------------------------------------
 
