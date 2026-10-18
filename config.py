@@ -67,13 +67,13 @@ BAND_CONTENT_FRACTION = 0.85
 # If a mode is "image" but the file is missing/unreadable, that band falls back
 # to its text so the display still works.
 
-HEADER_MODE = "text"             # "text" or "image"
+HEADER_MODE = "image"             # "text" or "image"
 HEADER_TEXT = "Together we can beat 2026"
-HEADER_IMAGE = None              # e.g. str(Path(__file__).resolve().parent / "header.png")
+HEADER_IMAGE = str(Path(__file__).resolve().parent / "PFT_Header_1.png")               # e.g. str(Path(__file__).resolve().parent / "header.png")
 
-FOOTER_MODE = "text"             # "text" or "image"
+FOOTER_MODE = "image"             # "text" or "image"
 FOOTER_TEXT = "Stronger Together"
-FOOTER_IMAGE = None              # e.g. str(Path(__file__).resolve().parent / "footer.png")
+FOOTER_IMAGE = str(Path(__file__).resolve().parent / "PFT_Footer_1.png")              # e.g. str(Path(__file__).resolve().parent / "footer.png")
 
 # Minimum number of digits to show (leading zeros pad to this width), giving a
 # stable odometer look. Fixed at 6 so the display always reads e.g. 000042.
