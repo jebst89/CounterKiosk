@@ -49,13 +49,13 @@ TEXT_COLOR = (255, 255, 255)     # white branding text
 # distributed above/below the counter. If they sum to > 1.0 they are scaled
 # down proportionally (with a warning) so the layout always fits.
 HEADER_HEIGHT_FRACTION = 0.18
-COUNTER_HEIGHT_FRACTION = 0.52
-FOOTER_HEIGHT_FRACTION = 0.14
+COUNTER_HEIGHT_FRACTION = 0.32
+FOOTER_HEIGHT_FRACTION = 0.34
 
 # Content inside each band is scaled to this fraction of the band's height so it
 # has a little breathing room and never touches the band edges. Applies to the
 # header/footer text or image and to the counter digits.
-BAND_CONTENT_FRACTION = 0.85
+BAND_CONTENT_FRACTION = 0.95
 
 # --- Display: header & footer content -----------------------------------------
 #
@@ -119,7 +119,7 @@ BUFFER_FLIPS = 2
 # for the Zero W to fill in software at a usable speed. For the biggest win,
 # ALSO lower the HDMI resolution to 720p or 480p (see README Troubleshooting);
 # that shrinks the real framebuffer so flip() moves fewer pixels too.
-RENDER_SCALE = 0.5
+RENDER_SCALE = 1
 
 # Whether flip() waits for vsync. On some drivers vsync makes flip() block for a
 # full refresh (or longer if misreported), adding latency, so this defaults to
