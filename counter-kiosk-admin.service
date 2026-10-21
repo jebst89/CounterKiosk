@@ -1,0 +1,47 @@
+[Unit]
+Description=Counter Kiosk Admin Web App (LAN-only HTTPS admin panel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- Who and where --------------------------------------------------------
+# Runs as the NON-root "pi" user. The only privileged actions (reboot/poweroff)
+# are permitted via the narrow sudoers allow-list in
+# /etc/sudoers.d/counter-kiosk-admin — the web app itself never runs as root.
+# Change User/Group/paths to match your deployment if different.
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/CounterKiosk
+
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/CounterKiosk/.venv/bin/python /home/pi/CounterKiosk/admin_web.py
+
+Restart=always
+RestartSec=3
+
+# --- Hardening ------------------------------------------------------------
+# Shrink the attack surface. These let the app read/write only its own
+# directory (for the SQLite DB, credentials, and cert) and nothing else.
+NoNewPrivileges=false
+# ^ must stay false: sudo (for reboot/poweroff) needs to raise privileges.
+ProtectSystem=strict
+ProtectHome=read-only
+# Allow writes only to the app directory (SQLite WAL files, etc.).
+ReadWritePaths=/home/pi/CounterKiosk
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# Network: the app only needs IPv4/IPv6 TCP sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# NOTE: we deliberately do NOT set RestrictSUIDSGID=true or an empty
+# CapabilityBoundingSet here — both would block the setuid `sudo` binary the
+# app relies on for the allow-listed reboot/poweroff commands.
+
+[Install]
+WantedBy=multi-user.target

@@ -27,6 +27,12 @@ at the value it left off.
 | `counter_kiosk.py` | Main app: button → count → fullscreen display. |
 | `counter-kiosk.service` | systemd unit for auto-start and auto-restart. |
 | `requirements.txt` | Python dependencies. |
+| `admin_web.py` | Optional LAN admin web panel (set count, reboot, shutdown). |
+| `set_admin_password.py` | Creates the admin password hash + session secret. |
+| `generate_admin_cert.sh` | Generates the admin panel's self-signed TLS cert. |
+| `counter-kiosk-admin.service` | systemd unit for the admin web app. |
+| `counter-kiosk-admin.sudoers` | Narrow reboot/poweroff allow-list for the admin app. |
+| `templates/`, `static/` | Admin web app HTML templates and CSS. |
 
 Each of `storage.py` and `seg_display.py` has a built-in self-test — run them
 directly (`python3 storage.py`, `python3 seg_display.py`) to verify them in
@@ -418,6 +424,101 @@ hdmi_drive=1
 `hdmi_drive=1` selects DVI mode (video only, no HDMI audio). Reboot afterwards.
 Alternatively, if the monitor has a volume control or a mute, muting its
 speakers also stops the noise since nothing in this project needs sound.
+
+## Admin web app (optional)
+
+A small Flask panel (`admin_web.py`) lets an administrator, from a browser on
+the **local network**, do three things:
+
+- set the counter to a specific value (persisted to the same SQLite DB; the
+  kiosk picks it up within a couple of seconds, no restart needed),
+- reboot the Pi,
+- shut down the Pi.
+
+It runs as its own systemd service, separate from the kiosk display.
+
+### Security model
+
+This panel can reboot/shut down the device, so it is built defensively:
+
+- **LAN only.** Do not expose it to the internet or port-forward to it. If you
+  need remote access, use a VPN or SSH tunnel.
+- **HTTPS.** Served with a self-signed certificate so the password and session
+  cookie never cross the network in cleartext. Browsers show a one-time
+  "not trusted" warning for self-signed certs — expected; accept it once.
+- **Hashed password.** The password is stored only as a PBKDF2-SHA256 hash
+  (plus a random session-signing key) in `admin_credentials.json`, written
+  `0600`. The plaintext is never stored.
+- **Session cookie** is signed, `HttpOnly`, `SameSite=Strict`, `Secure`, and
+  expires after 15 minutes idle.
+- **Brute-force lockout:** 5 failed logins from an IP locks that IP out for 5
+  minutes.
+- **CSRF protection** on every state-changing action.
+- **Confirmation words:** reboot/shutdown require typing `REBOOT` / `SHUTDOWN`.
+- **Least privilege:** the app runs as the non-root `pi` user. Reboot and
+  shutdown are the only privileged actions, performed by calling exactly
+  `/sbin/reboot` and `/sbin/poweroff` through a narrow `sudoers` allow-list — as
+  fixed argument lists with no shell and no user input, so the grant cannot be
+  abused to run anything else.
+- The systemd unit adds filesystem/kernel hardening (`ProtectSystem=strict`,
+  read-only home except the app dir, etc.).
+
+### Setup
+
+From the project directory on the Pi (inside the venv you already created):
+
+```bash
+cd /home/pi/CounterKiosk
+
+# 1. Install Flask into the venv.
+.venv/bin/pip install -r requirements.txt
+
+# 2. Set the admin password (prompts twice; min 12 chars). Writes
+#    admin_credentials.json (0600).
+.venv/bin/python set_admin_password.py
+
+# 3. Generate the self-signed TLS certificate. Pass the Pi's LAN IP so the cert
+#    is valid for it (find it with `hostname -I`).
+./generate_admin_cert.sh 192.168.1.50
+
+# 4. Install the sudoers allow-list for reboot/poweroff (validate before use).
+sudo cp counter-kiosk-admin.sudoers /etc/sudoers.d/counter-kiosk-admin
+sudo chmod 0440 /etc/sudoers.d/counter-kiosk-admin
+sudo visudo -cf /etc/sudoers.d/counter-kiosk-admin   # must say "parsed OK"
+
+# 5. Install and start the service.
+sudo cp counter-kiosk-admin.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now counter-kiosk-admin.service
+```
+
+If your Pi user is not `pi`, edit the `User`/`Group`/paths in
+`counter-kiosk-admin.service` and the username in `counter-kiosk-admin.sudoers`
+to match (and re-validate the sudoers file with `visudo -cf`).
+
+### Using it
+
+Browse to `https://<pi-ip>:8443/` (or `https://<hostname>.local:8443/`). Accept
+the self-signed certificate warning once, log in with the admin password, and
+you get the dashboard: current count, a set-count field, and reboot/shutdown
+buttons (each needing its confirmation word).
+
+### Changing the password later
+
+```bash
+.venv/bin/python set_admin_password.py          # overwrites the hash
+sudo systemctl restart counter-kiosk-admin.service
+```
+
+### Notes and limits
+
+- The set-count value is validated as a non-negative integer within SQLite's
+  range and written through the same durable path as a button press.
+- The login lockout is in-memory, so restarting the service clears it. That is
+  fine for brute-force mitigation on a single-process LAN app.
+- Port `8443` is the default (`ADMIN_BIND_PORT` in `config.py`). Set
+  `ADMIN_BIND_HOST = "127.0.0.1"` if you want the panel reachable only from the
+  Pi itself (via an SSH tunnel).
 
 ## Future: AWS IoT
 

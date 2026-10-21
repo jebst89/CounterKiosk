@@ -1,0 +1,16 @@
+# Counter Kiosk admin web app — privilege allow-list.
+#
+# Lets the service user run ONLY the two power commands the admin panel needs,
+# with no password, and NOTHING else. The admin web app invokes these as fixed
+# argument lists (no shell, no user input), so this grant cannot be used to run
+# arbitrary commands.
+#
+# INSTALL (as root), validating syntax before it takes effect:
+#   sudo cp counter-kiosk-admin.sudoers /etc/sudoers.d/counter-kiosk-admin
+#   sudo chmod 0440 /etc/sudoers.d/counter-kiosk-admin
+#   sudo visudo -cf /etc/sudoers.d/counter-kiosk-admin   # must print "parsed OK"
+#
+# Replace "pi" below if the admin service runs as a different user. The paths
+# must match exactly what admin_web.py calls (REBOOT_CMD / SHUTDOWN_CMD).
+
+pi ALL=(root) NOPASSWD: /sbin/reboot, /sbin/poweroff

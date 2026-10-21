@@ -91,6 +91,29 @@ class CounterStore:
             )
             return int(cur.fetchone()[0])
 
+    def set_count(self, value: int) -> int:
+        """Atomically set the count to an exact value and return it.
+
+        Used by the admin web app to force a specific number. Durably committed
+        the same way as increment(), so the kiosk resumes from it after a
+        restart. Rejects negatives and values outside the SQLite INTEGER range.
+        """
+        if not isinstance(value, int):
+            raise TypeError("value must be an int")
+        if value < 0:
+            raise ValueError("value must be non-negative")
+        if value > 9_223_372_036_854_775_807:
+            raise ValueError("value exceeds the supported range")
+        with self._conn:
+            self._conn.execute(
+                "UPDATE counter SET value = ? WHERE id = ?",
+                (value, self._ROW_ID),
+            )
+            cur = self._conn.execute(
+                "SELECT value FROM counter WHERE id = ?", (self._ROW_ID,)
+            )
+            return int(cur.fetchone()[0])
+
     def close(self) -> None:
         self._conn.close()
 
@@ -121,6 +144,18 @@ if __name__ == "__main__":
     with CounterStore(tmp) as s:
         assert s.get_count() == 7, "count should survive reopen"
         assert s.increment() == 8
+
+        # set_count: exact set, persistence, and validation.
+        assert s.set_count(1000) == 1000
+        assert s.get_count() == 1000
+        assert s.increment() == 1001
+        assert s.set_count(0) == 0
+        for bad in (-1, 9_223_372_036_854_775_808):
+            try:
+                s.set_count(bad)
+                raise AssertionError("set_count should reject %r" % (bad,))
+            except ValueError:
+                pass
 
     os.remove(tmp)
     print("storage.py self-test passed")

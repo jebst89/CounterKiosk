@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="post" action="{{ url_for('login') }}" class="card" autocomplete="off">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <label for="password">Administrator password</label>
+  <input type="password" id="password" name="password" required autofocus>
+  <button type="submit" class="btn">Log in</button>
+</form>
+{% endblock %}

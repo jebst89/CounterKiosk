@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+  <h2>Current count</h2>
+  <p class="count">{{ "%06d"|format(count) }}</p>
+</section>
+
+<section class="card">
+  <h2>Set counter</h2>
+  <form method="post" action="{{ url_for('set_count') }}" autocomplete="off">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label for="value">New value (whole number, 0 or greater)</label>
+    <input type="number" id="value" name="value" min="0" step="1" required
+           inputmode="numeric" value="{{ count }}">
+    <button type="submit" class="btn">Set count</button>
+  </form>
+</section>
+
+<section class="card danger">
+  <h2>Power</h2>
+  <p class="warn">These take the kiosk offline. Type the confirmation word.</p>
+
+  <form method="post" action="{{ url_for('reboot') }}" autocomplete="off">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label for="confirm-reboot">Type <strong>REBOOT</strong> to confirm</label>
+    <input type="text" id="confirm-reboot" name="confirm" autocomplete="off"
+           pattern="REBOOT" required>
+    <button type="submit" class="btn btn-danger">Reboot Pi</button>
+  </form>
+
+  <form method="post" action="{{ url_for('shutdown') }}" autocomplete="off">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label for="confirm-shutdown">Type <strong>SHUTDOWN</strong> to confirm</label>
+    <input type="text" id="confirm-shutdown" name="confirm" autocomplete="off"
+           pattern="SHUTDOWN" required>
+    <button type="submit" class="btn btn-danger">Shut down Pi</button>
+  </form>
+</section>
+
+<form method="post" action="{{ url_for('logout') }}" class="logout">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  <button type="submit" class="btn btn-plain">Log out</button>
+</form>
+
+{% endblock %}

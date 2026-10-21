@@ -30,4 +30,10 @@ gpiozero==2.0.1
 # pygame==2.6.1
 # rpi-lgpio==0.6
 
+# --- Admin web app (admin_web.py) -------------------------------------------
+# Flask is pure Python and installs cleanly from pip on ARMv6. Werkzeug (its
+# dependency) provides the PBKDF2 password hashing used by the admin login.
+# Only needed if you run the optional admin panel.
+flask==3.0.3
+
 # Note: sqlite3 is part of the Python standard library — no package needed.

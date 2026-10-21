@@ -161,3 +161,34 @@ SCREENSAVER_DURATION_SECONDS = 20
 # given pixel is not permanently lit. Set MAX to 0 to disable pixel-shift.
 PIXEL_SHIFT_MAX = 8
 PIXEL_SHIFT_INTERVAL_SECONDS = 60
+
+# --- Admin web app ------------------------------------------------------------
+#
+# A small Flask admin panel (admin_web.py) runs as its own service and shares
+# this DB_PATH via storage.py. It is intended for a TRUSTED LAN ONLY — do not
+# expose it to the internet or port-forward to it.
+
+# Interface to bind to. "0.0.0.0" listens on all interfaces so other machines on
+# the LAN can reach it; set to "127.0.0.1" to restrict to the Pi itself.
+ADMIN_BIND_HOST = "0.0.0.0"
+ADMIN_BIND_PORT = 8443
+
+# Where the admin credentials live. This file is created by
+# set_admin_password.py and holds a JSON blob with the password HASH (never the
+# plaintext) and a random session secret key. It must be readable only by the
+# service user (the helper sets 0600 permissions).
+ADMIN_CREDENTIALS_FILE = str(Path(__file__).resolve().parent / "admin_credentials.json")
+
+# Self-signed TLS certificate + key (created per the README). Serving over HTTPS
+# keeps the password and session cookie from crossing the LAN in cleartext.
+ADMIN_TLS_CERT = str(Path(__file__).resolve().parent / "admin_cert.pem")
+ADMIN_TLS_KEY = str(Path(__file__).resolve().parent / "admin_key.pem")
+
+# Login brute-force protection: after this many consecutive failed attempts
+# (tracked per client IP) logins are refused for the lockout window.
+ADMIN_MAX_FAILED_ATTEMPTS = 5
+ADMIN_LOCKOUT_SECONDS = 300          # 5 minutes
+
+# Session lifetime. The signed session cookie expires after this idle period,
+# forcing re-login.
+ADMIN_SESSION_LIFETIME_SECONDS = 900  # 15 minutes

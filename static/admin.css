@@ -1,0 +1,115 @@
+:root {
+  --bg: #0f1115;
+  --panel: #1a1d24;
+  --card: #22262f;
+  --text: #e8eaed;
+  --muted: #9aa0a6;
+  --accent: #c62828;
+  --accent-text: #fff;
+  --ok: #2e7d32;
+  --err: #c62828;
+  --border: #333842;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.panel {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 {
+  font-size: 1.3rem;
+  text-align: center;
+  margin: 8px 0 20px;
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin: 0 0 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card.danger { border-color: var(--accent); }
+
+.count {
+  font-variant-numeric: tabular-nums;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: center;
+  letter-spacing: 0.08em;
+  margin: 4px 0;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+input[type="password"],
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #11141a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.btn {
+  display: inline-block;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #2f6fed;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-danger { background: var(--accent); color: var(--accent-text); }
+.btn-plain { background: #3a3f4a; }
+
+.btn + .btn, form + form { margin-top: 8px; }
+
+.danger form + form { margin-top: 18px; }
+
+.warn { color: var(--muted); font-size: 0.85rem; margin-top: 0; }
+
+.logout { margin-top: 24px; }
+
+.flashes { list-style: none; padding: 0; margin: 0 0 16px; }
+
+.flash {
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 0.92rem;
+}
+
+.flash-success { background: rgba(46, 125, 50, 0.18); border: 1px solid var(--ok); }
+.flash-error { background: rgba(198, 40, 40, 0.18); border: 1px solid var(--err); }

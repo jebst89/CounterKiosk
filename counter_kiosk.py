@@ -158,7 +158,34 @@ class KioskApp:
         self._t_render_start = 0.0
         self._t_press = 0.0
 
+        # The admin web app can change the count in the shared DB while the
+        # kiosk is running. Poll the DB occasionally so such external changes
+        # appear on screen without needing a button press.
+        self._last_db_poll = 0.0
+        self._db_poll_interval = 2.0  # seconds
+
     # --- state ---------------------------------------------------------------
+
+    def _poll_external_count(self) -> None:
+        """Adopt the DB value if another process (the admin app) changed it.
+
+        Called from the render loop. Cheap: a single indexed SELECT every
+        _db_poll_interval seconds. If the stored value differs from our
+        in-memory count, we take it and request a redraw.
+        """
+        now = time.monotonic()
+        if now - self._last_db_poll < self._db_poll_interval:
+            return
+        self._last_db_poll = now
+        try:
+            db_value = self._store.get_count()
+        except Exception:
+            return
+        with self._lock:
+            if db_value != self._count:
+                self._count = db_value
+                self._dirty = True
+                self._wake.set()
 
     def _on_press(self) -> None:
         """Button press handler. May be called from a gpiozero thread.
@@ -627,6 +654,9 @@ class KioskApp:
                         self._buttons.handle_key(event)
                     else:
                         self._buttons.handle_key(event)
+
+                # Pick up any count change made externally (admin web app).
+                self._poll_external_count()
 
                 count, dirty, last_activity = self._snapshot()
                 now = time.monotonic()
